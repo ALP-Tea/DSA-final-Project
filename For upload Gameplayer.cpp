@@ -1,4 +1,7 @@
+#include <map>
 #include<algorithm>
+#include<queue>
+#include<vector>
 class GamePlayer final : public Feis::IGamePlayer
 {
 public:
@@ -21,6 +24,11 @@ public:
     }
     void EnqueueAction(const PlayerAction action) { actions_.push(action); }
 private:
+    struct CellPositionLess {
+        bool operator()(const CellPosition& a, const CellPosition& b) const {
+            return a.row < b.row || (a.row == b.row && a.col < b.col);
+        }
+    };
     void Establish_map(const IGameInfo& info) 
     {
         int height = GameManagerConfig::kBoardHeight;
@@ -72,56 +80,55 @@ private:
         }
     }
 void BuildMiningPath(const IGameInfo& info, CellPosition src, CellPosition dst) {
-    std::map<std::pair<int, int>, std::pair<int, int>> parent;
+
+    std::map<CellPosition, CellPosition, CellPositionLess> parent;
     std::queue<CellPosition> q;
-    std::set<std::pair<int, int>> visited;
+    std::set<CellPosition, CellPositionLess> visited;
 
     q.push(src);
-    visited.insert({src.row, src.col});
+    visited.insert(src);
 
-    std::vector<std::pair<int, int>> dir{{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    std::map<std::pair<int, int>, Direction> dirMap{
-        {{-1, 0}, Direction::kTop},
-        {{1, 0}, Direction::kBottom},
-        {{0, -1}, Direction::kLeft},
-        {{0, 1}, Direction::kRight}
+    std::vector<std::pair<int,int>> dir{{-1,0},{1,0},{0,-1},{0,1}};
+    std::map<std::pair<int,int>, Direction> dirMap{
+        {{-1,0}, Direction::kTop},
+        {{1,0}, Direction::kBottom},
+        {{0,-1}, Direction::kLeft},
+        {{0,1}, Direction::kRight}
     };
-
     bool found = false;
-
     while (!q.empty()) {
-        CellPosition cur = q.front();
-        q.pop();
-
-        if (cur == dst) {
+        CellPosition cur = q.front(); q.pop();
+        if (cur.row == dst.row && cur.col == dst.col) {
             found = true;
             break;
         }
-
         for (auto [dr, dc] : dir) {
             int nr = cur.row + dr;
             int nc = cur.col + dc;
             if (nr < 0 || nc < 0 || nr >= (int)myboard.size() || nc >= (int)myboard[0].size())
                 continue;
-            if (myboard[nr][nc] == -1 || visited.count({nr, nc}))
+
+            // 不能是牆壁(-1)或數字礦藏(-5)，兩者皆不可通過作為路徑
+            if (myboard[nr][nc] == -1 || myboard[nr][nc] == -5)
                 continue;
 
-            parent[{nr, nc}] = {cur.row, cur.col};
-            visited.insert({nr, nc});
-            q.push({nr, nc});
+            CellPosition next{nr, nc};
+            if (visited.count(next)) continue;
+            parent[next] = cur;
+            visited.insert(next);
+            q.push(next);
         }
     }
-
     if (!found) return;
-
     // 回推路徑
     std::vector<CellPosition> path;
-    for (std::pair<int, int> at = {dst.row, dst.col}; at != std::pair<int, int>{src.row, src.col}; at = parent[at]) {
-        path.push_back({at.first, at.second});
-    }
+    for (CellPosition at = dst; !(at.row == src.row && at.col == src.col); at = parent[at])
+        path.push_back(at);
     std::reverse(path.begin(), path.end());
 
-    // 放礦機
+    if (path.empty()) return;
+
+    // 建造礦機，必須連接 src 到 path[0] 方向
     CellPosition outPos = path.front();
     int dr = outPos.row - src.row;
     int dc = outPos.col - src.col;
@@ -134,21 +141,19 @@ void BuildMiningPath(const IGameInfo& info, CellPosition src, CellPosition dst) 
         case Direction::kBottom: EnqueueAction({PlayerActionType::BuildBottomOutMiningMachine, src}); break;
     }
 
-    // 放傳送帶
+    // 建造傳送帶，路徑中間段
     for (size_t i = 0; i + 1 < path.size(); ++i) {
         CellPosition from = path[i], to = path[i + 1];
         int drow = to.row - from.row;
         int dcol = to.col - from.col;
         Direction dir = dirMap[{drow, dcol}];
         PlayerActionType act;
-
         switch (dir) {
             case Direction::kLeft: act = PlayerActionType::BuildRightToLeftConveyor; break;
             case Direction::kRight: act = PlayerActionType::BuildLeftToRightConveyor; break;
             case Direction::kTop: act = PlayerActionType::BuildBottomToTopConveyor; break;
             case Direction::kBottom: act = PlayerActionType::BuildTopToBottomConveyor; break;
         }
-
         EnqueueAction({act, from});
     }
 }
@@ -158,11 +163,6 @@ void BuildMiningPath(const IGameInfo& info, CellPosition src, CellPosition dst) 
         for (auto& mine : usable_mine) {
             BuildMiningPath(info, mine, factoryCenter); // 3. 為能整除的礦建構傳送帶
         }
-        handle_bad_mine(info, bad_mine); // 4. 將不能整除的礦合成
-    }
-    void handle_bad_mine(const IGameInfo& info , std::map<int , CellPosition>& bad_mine)
-    {
-        
     }
     bool not_initialize = true ;
     std::queue<PlayerAction> actions_;
