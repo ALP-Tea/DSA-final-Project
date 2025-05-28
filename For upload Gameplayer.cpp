@@ -1,4 +1,4 @@
-#include<map>
+#include<algorithm>
 class GamePlayer final : public Feis::IGamePlayer
 {
 public:
@@ -71,9 +71,88 @@ private:
             }
         }
     }
-    void BuildMiningPath(const IGameInfo& info, CellPosition src, CellPosition dst) {
+void BuildMiningPath(const IGameInfo& info, CellPosition src, CellPosition dst) {
+    std::map<std::pair<int, int>, std::pair<int, int>> parent;
+    std::queue<CellPosition> q;
+    std::set<std::pair<int, int>> visited;
 
+    q.push(src);
+    visited.insert({src.row, src.col});
+
+    std::vector<std::pair<int, int>> dir{{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    std::map<std::pair<int, int>, Direction> dirMap{
+        {{-1, 0}, Direction::kTop},
+        {{1, 0}, Direction::kBottom},
+        {{0, -1}, Direction::kLeft},
+        {{0, 1}, Direction::kRight}
+    };
+
+    bool found = false;
+
+    while (!q.empty()) {
+        CellPosition cur = q.front();
+        q.pop();
+
+        if (cur == dst) {
+            found = true;
+            break;
+        }
+
+        for (auto [dr, dc] : dir) {
+            int nr = cur.row + dr;
+            int nc = cur.col + dc;
+            if (nr < 0 || nc < 0 || nr >= (int)myboard.size() || nc >= (int)myboard[0].size())
+                continue;
+            if (myboard[nr][nc] == -1 || visited.count({nr, nc}))
+                continue;
+
+            parent[{nr, nc}] = {cur.row, cur.col};
+            visited.insert({nr, nc});
+            q.push({nr, nc});
+        }
     }
+
+    if (!found) return;
+
+    // 回推路徑
+    std::vector<CellPosition> path;
+    for (std::pair<int, int> at = {dst.row, dst.col}; at != std::pair<int, int>{src.row, src.col}; at = parent[at]) {
+        path.push_back({at.first, at.second});
+    }
+    std::reverse(path.begin(), path.end());
+
+    // 放礦機
+    CellPosition outPos = path.front();
+    int dr = outPos.row - src.row;
+    int dc = outPos.col - src.col;
+    Direction miningDir = dirMap[{dr, dc}];
+
+    switch (miningDir) {
+        case Direction::kLeft: EnqueueAction({PlayerActionType::BuildLeftOutMiningMachine, src}); break;
+        case Direction::kTop: EnqueueAction({PlayerActionType::BuildTopOutMiningMachine, src}); break;
+        case Direction::kRight: EnqueueAction({PlayerActionType::BuildRightOutMiningMachine, src}); break;
+        case Direction::kBottom: EnqueueAction({PlayerActionType::BuildBottomOutMiningMachine, src}); break;
+    }
+
+    // 放傳送帶
+    for (size_t i = 0; i + 1 < path.size(); ++i) {
+        CellPosition from = path[i], to = path[i + 1];
+        int drow = to.row - from.row;
+        int dcol = to.col - from.col;
+        Direction dir = dirMap[{drow, dcol}];
+        PlayerActionType act;
+
+        switch (dir) {
+            case Direction::kLeft: act = PlayerActionType::BuildRightToLeftConveyor; break;
+            case Direction::kRight: act = PlayerActionType::BuildLeftToRightConveyor; break;
+            case Direction::kTop: act = PlayerActionType::BuildBottomToTopConveyor; break;
+            case Direction::kBottom: act = PlayerActionType::BuildTopToBottomConveyor; break;
+        }
+
+        EnqueueAction({act, from});
+    }
+}
+
     void ActionDetermined(const IGameInfo& info)
     {
         for (auto& mine : usable_mine) {
